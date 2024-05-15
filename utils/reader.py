@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 
 from utils.binary import DatasetReader
+from utils.data_utils import remove_punctuation
 
 
 class CustomDataset(Dataset):
@@ -23,7 +24,9 @@ class CustomDataset(Dataset):
                  sample_rate=16000,
                  min_duration=0.5,
                  max_duration=30,
-                 augment_config_path=None):
+                 augment_config_path=None,
+                 prompt=None,
+                 ):
         """
         Args:
             data_list_path: 数据列表文件的路径，或者二进制列表的头文件路径
@@ -59,6 +62,7 @@ class CustomDataset(Dataset):
             self.nospeech = self.vocab['<|nocaptions|>']
             self.timestamp_begin = self.vocab['<|notimestamps|>'] + 1
         self.data_list: List[dict] = []
+        self.prompt = prompt
         # 加载数据列表
         self._load_data_list()
         # 数据增强配置参数
@@ -91,6 +95,8 @@ class CustomDataset(Dataset):
                     continue
                 if self.max_duration != -1 and line["duration"] > self.max_duration:
                     continue
+                if line["any_oovs"]: # 跳過有oov的
+                    continue
                 self.data_list.append(dict(line))
 
     # 从数据列表里面获取音频数据、采样率和文本
@@ -100,15 +106,16 @@ class CustomDataset(Dataset):
         else:
             data_list = self.data_list[idx]
         # 分割音频路径和标签
-        audio_file = data_list["audio"]['path']
-        transcript = data_list["sentences"] if self.timestamps else data_list["sentence"]
+        audio_file = data_list["audio_path"].replace("/mnt/md0/", "/mnt/")
+        transcript = remove_punctuation(data_list["text"].replace(" ", ""))# data_list["sentences"] if self.timestamps else data_list["sentence"]
         language = data_list["language"] if 'language' in data_list.keys() else None
-        if 'start_time' not in data_list["audio"].keys():
-            sample, sample_rate = soundfile.read(audio_file, dtype='float32')
-        else:
-            start_time, end_time = data_list["audio"]["start_time"], data_list["audio"]["end_time"]
-            # 分割读取音频
-            sample, sample_rate = self.slice_from_file(audio_file, start=start_time, end=end_time)
+        # if 'start_time' not in data_list["audio"].keys():
+        #     sample, sample_rate = soundfile.read(audio_file, dtype='float32')
+        # else:
+        #     start_time, end_time = data_list["audio"]["start_time"], data_list["audio"]["end_time"]
+        #     # 分割读取音频
+        #     sample, sample_rate = self.slice_from_file(audio_file, start=start_time, end=end_time)
+        sample, sample_rate = soundfile.read(audio_file, dtype='float32')
         sample = sample.T
         # 转成单通道
         if self.mono:
@@ -163,6 +170,9 @@ class CustomDataset(Dataset):
                 # 如果没有文本，则使用<|nospeech|>标记
                 data = self.processor(audio=sample, sampling_rate=self.sample_rate)
                 data['labels'] = [self.startoftranscript, self.nospeech, self.endoftext]
+            if self.prompt:
+                prompt_ids = self.processor.get_prompt_ids(self.prompt)
+                data['labels'] = prompt_ids.tolist() + data['labels']
             return data
         except Exception as e:
             print(f'读取数据出错，序号：{idx}，错误信息：{e}', file=sys.stderr)

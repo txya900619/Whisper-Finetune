@@ -29,7 +29,7 @@ device = "cuda:0" if torch.cuda.is_available() and args.use_gpu else "cpu"
 torch_dtype = torch.float16 if torch.cuda.is_available() and args.use_gpu else torch.float32
 
 # 获取Whisper的特征提取器、编码器和解码器
-processor = AutoProcessor.from_pretrained(args.model_path)
+processor = AutoProcessor.from_pretrained("openai/whisper-large-v3")
 
 # 获取模型
 model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -66,11 +66,11 @@ infer_pipe = pipeline("automatic-speech-recognition",
                       device=device)
 
 # 推理参数
-generate_kwargs = {"task": args.task, "num_beams": args.num_beams}
+generate_kwargs = {"task": args.task, "num_beams": args.num_beams, "prompt_ids": torch.from_numpy(processor.get_prompt_ids("htia_sixian")).to(device)}
 if args.language is not None:
     generate_kwargs["language"] = args.language
 # 推理
-result = infer_pipe(args.audio_path, return_timestamps=True, generate_kwargs=generate_kwargs)
-
-for chunk in result["chunks"]:
-    print(f"[{chunk['timestamp'][0]}-{chunk['timestamp'][1]}s] {chunk['text']}")
+result = infer_pipe(args.audio_path, return_timestamps=False, generate_kwargs=generate_kwargs)
+print(result)
+# for chunk in result["chunks"]:
+#     print(f"[{chunk['timestamp'][0]}-{chunk['timestamp'][1]}s] {chunk['text']}")

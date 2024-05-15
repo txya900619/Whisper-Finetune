@@ -52,14 +52,32 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         # pad the labels to max length
         labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
 
-        # replace padding with -100 to ignore loss correctly
-        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
+        # # replace padding with -100 to ignore loss correctly
+        # labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
 
-        # if bos token is appended in previous tokenization step,
-        # cut bos token here as it's append later anyways
-        if (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
-            labels = labels[:, 1:]
+        # # if bos token is appended in previous tokenization step,
+        # # cut bos token here as it's append later anyways
+        # if (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
+        #     labels = labels[:, 1:]
+
+        # batch["labels"] = labels
+
+        # shift labels to the right to get decoder input ids
+        labels = labels_batch["input_ids"]
+        decoder_input_ids = labels[:, :-1]
+        labels = labels[:, 1:]
+        labels_mask = labels_batch.attention_mask[:, 1:]
+
+        # replace padding with -100 to ignore correctly when computing the loss
+        labels = labels.masked_fill(labels_mask.ne(1), -100)
+
+        # replace initial prompt tokens with -100 to ignore correctly when computing the loss
+        bos_index = torch.argmax((labels == self.processor.tokenizer.get_vocab()["<|startoftranscript|>"]).long(), dim=1)
+        prompt_mask = torch.arange(labels.shape[1]) < bos_index[:, None]
+        labels = torch.where(prompt_mask, -100, labels)
 
         batch["labels"] = labels
+        batch["decoder_input_ids"] = decoder_input_ids
+
 
         return batch
